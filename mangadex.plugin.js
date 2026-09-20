@@ -179,6 +179,8 @@ const plugin = {
       ["offset", itemOffset],
       ["includes[]", "cover_art"],
       ["includes[]", "author"],
+      ["availableTranslatedLanguage[]", "en"],
+      ["hasAvailableChapters", "true"],
       ["order[followedCount]", "desc"],
       ["contentRating[]", "safe"],
       ["contentRating[]", "suggestive"]
@@ -208,6 +210,8 @@ const plugin = {
       ["title", normalizedQuery],
       ["includes[]", "cover_art"],
       ["includes[]", "author"],
+      ["availableTranslatedLanguage[]", "en"],
+      ["hasAvailableChapters", "true"],
       ["order[relevance]", "desc"],
       ["contentRating[]", "safe"],
       ["contentRating[]", "suggestive"]

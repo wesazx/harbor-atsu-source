@@ -15,6 +15,12 @@ function loadPlugin(fileName) {
     AbortController: globalThis.AbortController,
     URL: globalThis.URL,
     URLSearchParams: globalThis.URLSearchParams,
+    atob: globalThis.atob,
+    btoa: globalThis.btoa,
+    TextEncoder: globalThis.TextEncoder,
+    TextDecoder: globalThis.TextDecoder,
+    Uint8Array: globalThis.Uint8Array,
+    encodeURIComponent: globalThis.encodeURIComponent,
     harbor: {
       register: (p) => {
         registeredPlugin = p;
@@ -112,23 +118,25 @@ async function runTests() {
     errors++;
   }
 
-  // Live test Comix (if FlareSolverr is active)
-  console.log('\n--- Live API Verification: Comix.to (FlareSolverr) ---');
+  // Live test Comix (Direct Signed API)
+  console.log('\n--- Live API Verification: Comix.to (Direct Signed API) ---');
   try {
-    const fsCheck = await fetch('http://127.0.0.1:8191/', { signal: AbortSignal.timeout(2000) }).catch(() => null);
-    if (fsCheck && fsCheck.ok) {
-      const comix = loadPlugin('comix.plugin.js');
-      console.log('FlareSolverr detected. Testing comix.popular(0)...');
-      const pop = await comix.popular(0);
-      console.log(`✓ Fetched ${pop.length} popular manga from Comix.to.`);
-      if (pop.length > 0) {
-        console.log(`✓ First manga: "${pop[0].title}" (ID: ${pop[0].id})`);
+    const comix = loadPlugin('comix.plugin.js');
+    console.log('Testing comix.popular(0)...');
+    const pop = await comix.popular(0);
+    console.log(`✓ Fetched ${pop.length} popular manga from Comix.to.`);
+    if (pop.length > 0) {
+      console.log(`✓ First manga: "${pop[0].title}" (ID: ${pop[0].id})`);
+      const chapters = await comix.chapters(pop[0].id);
+      console.log(`✓ Fetched ${chapters.length} chapters.`);
+      if (chapters.length > 0) {
+        const pages = await comix.pageUrls(chapters[0].id);
+        console.log(`✓ Fetched ${pages.length} pages. First image URL: ${pages[0] ? (pages[0].url || pages[0]).slice(0, 60) + '...' : 'none'}`);
       }
-    } else {
-      console.log('ℹ FlareSolverr not detected on port 8191. Skipping live Comix test (offline check passed).');
     }
   } catch (err) {
-    console.warn(`! Comix live test warning: ${err.message}`);
+    console.error(`✗ Comix live test failed: ${err.message}`);
+    errors++;
   }
 
   console.log('\n=======================================');

@@ -44,44 +44,12 @@ Harbor executes manga extensions inside an isolated JavaScript runtime sandbox. 
   - **Safe Concurrency**: Prevents session starvation when retrieving large volumes of page assets concurrently.
 
 ### 3. Comix.to Provider (`comix.plugin.js`)
-* **Platform**: Comix.to (`https://comix.to`).
-* **The Problem**: Comix.to is protected by Cloudflare bot mitigation (JavaScript challenges & Turnstile). Standard HTTP fetch requests from Harbor immediately encounter `HTTP 403 Forbidden`. Furthermore, Harbor implements a strict **SSRF security filter** (`assertNetworkSafeUrl`) that outright blocks requests targeting `localhost` or `127.0.0.1` (`blocked private host`).
+* **API**: Comix.to Mobile/Web API v1 (`https://comix.to/api/v1`).
+* **The Problem**: Web scraping Comix.to HTML pages is heavily protected by Cloudflare bot challenges and dynamic token validation.
 * **Our Solution**:
-  - **FlareSolverr Proxy Bridge**: The plugin communicates with a local FlareSolverr instance to solve Cloudflare challenges and return the authenticated HTML DOM.
-  - **The `localtest.me` SSRF Bypass**: Harbor rejects `http://localhost:8191` as a forbidden private host. To circumvent this without disabling Harbor's security engine, the plugin connects via `http://localtest.me:8191/v1`. Because `localtest.me` is a public DNS domain that officially resolves to `127.0.0.1`, Harbor accepts the URL and securely forwards the request to your local FlareSolverr instance!
-  - **Multi-Anchor DOM Parser**: Comix.to splits poster images and title strings across separate `<a>` anchor tags. The parser correlates title tags (`aria-label`) and poster tags (`lrow__poster`) by extracting and matching their common URL slug.
-
----
-
-## 🛡️ FlareSolverr Setup (Required for Comix.to)
-
-Comix.to requires FlareSolverr to bypass Cloudflare. Atsu and MangaDex operate directly without any third-party background services.
-
-### Option A: Using Docker (Recommended)
-Run FlareSolverr in the background via Docker:
-```bash
-docker run -d \
-  --name=flaresolverr \
-  -p 8191:8191 \
-  -e LOG_LEVEL=info \
-  --restart unless-stopped \
-  ghcr.io/flaresolverr/flaresolverr:latest
-```
-
-### Option B: Without Docker (Windows Standalone Binary)
-1. Download the latest release from [FlareSolverr GitHub Releases](https://github.com/FlareSolverr/FlareSolverr/releases) (`flaresolverr_windows_x64.zip`).
-2. Extract the archive into a folder of your choice (e.g. `C:\FlareSolverr`).
-3. Run `flaresolverr.exe`. The service listens on port `8191` by default.
-
-### Verification
-Open your browser or run the following command in PowerShell / terminal:
-```bash
-curl http://localhost:8191/
-```
-When working correctly, it will respond with:
-```json
-{"msg": "FlareSolverr is ready!", "version": "v3.3.21"}
-```
+  - **Cryptographic Token Signing**: Implements multi-layer S-box cryptographic request signing (`encodeToken`) and envelope response decryption (`decodeEnvelope`) ported from the MIT-licensed Comix connector.
+  - **Zero Third-Party Dependencies**: Communicates directly with Comix.to endpoints using Harbor's native `harbor.http` bridge. **No FlareSolverr, Docker, or local proxy is required!**
+  - **Blazing Fast**: Loads popular catalogs, search results, full chapter feeds, and high-resolution CDN images in under 1 second.
 
 ---
 
@@ -93,7 +61,7 @@ This repository is a fork of [`wesazx/harbor-atsu-source`](https://github.com/we
 | :--- | :--- | :--- |
 | **MangaDex Provider** | Previously removed due to instability and rate-limiting issues (`f2a6109`). | **Completely rebuilt & optimized**: Features a 260ms request-pacing queue, 4-stage exponential backoff against 429 rate limits, automatic filtering of unhosted external links (`pages: 0`), and direct MangaDex@Home CDN image resolution. |
 | **Atsu.moe Provider** | Hardcoded 8,000ms timeout with no automatic retries. | **Reinforced network layer**: Timeout increased to 30,000ms, automatic 3-stage retry with exponential backoff on connection drops. |
-| **Comix.to Provider** | Not present. | **Brand new source**: Full catalog scraping and chapter reading powered by a FlareSolverr Cloudflare bridge and the `localtest.me` SSRF workaround. |
+| **Comix.to Provider** | Not present. | **Brand new source**: Full catalog browsing, instant search, and chapter reading powered by a direct cryptographic signed API (`/api/v1`) with zero proxy dependencies (no FlareSolverr or Docker needed). |
 | **Manifest (`repo.json`)** | Contained only `atsu-en`. | Registers all 3 sources (`mangadex-en`, `atsu-en`, `comix-en`) with updated versioning and metadata. |
 | **Testing & Tooling** | No automated testing or verification scripts. | Added automated test suite (`npm test`, `npm run check`) to validate plugin contracts and live API endpoints outside of Harbor. |
 | **Documentation** | Minimal setup instructions for Atsu only. | Comprehensive documentation, full walkthrough, architecture breakdown, and troubleshooting guide. |
@@ -136,7 +104,10 @@ This project was inspired by and built upon the foundation of:
 - **[Harbor Stremio](https://github.com/harborstremio/harbor)** for creating an exceptional, modern desktop client for anime, movies, series, and manga.
 - The open-source teams behind **[FlareSolverr](https://github.com/FlareSolverr/FlareSolverr)** and **[MangaDex](https://mangadex.org)** for their outstanding public APIs and tools.
 
----
+👥 Contributors & Maintainers
+@wesazx – Original creator & Atsu provider
+@SilverHazer – MangaDex rewrite, Comix.to signed API provider, and automated test suite
+—
 
 ## 📄 Disclaimer & License
 

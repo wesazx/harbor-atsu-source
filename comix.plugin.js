@@ -1,317 +1,251 @@
-// Comix.to plugin for Harbor Stremio reader.
-// Supports Cloudflare bypass via FlareSolverr (http://localtest.me:8191/v1)
-// Note: "localtest.me" is used because Harbor's plugin security blocks "localhost" or "127.0.0.1".
+/*
+ * Harbor manga source for Comix.
+ *
+ * Request signing and response decoding are ported from the MIT-licensed
+ * Comix connector maintained at:
+ * https://github.com/N3uralCreativity/comix-downloader
+ */
 
-const COMIX_ORIGIN = "https://comix.to";
-// Default FlareSolverr URL using localtest.me to pass Harbor's private-host check
-const FLARESOLVERR_ENDPOINT = "http://localtest.me:8191/v1";
+const BASE = "https://comix.to";
+const API = BASE + "/api/v1";
 const PAGE_SIZE = 28;
-const TIMEOUT_MS = 35000;
+const MAX_CHAPTER_PAGES = 50;
 
-function delay(ms) {
-  return new Promise(function (resolve) {
-    setTimeout(resolve, ms);
-  });
+const B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+const LAYER_DATA = [
+  {
+    sbox: "gbicCvAMzfcXEtGAyjvvhmb2yCWzWhjqcxXZ7ZhpzANOzoQLo3nuPZ2vK9dkb9hJExC0Vni/hdQBceI+mw611gkhQFjBuf4bJg1TxYqM+SL4YDqtwjxiGSdeH7so7Fn1HiRo37Z+RNvl44twXWVhomtMjw+8bemfmv9XEXr7mS82MxaCOJZRR0oHd9PLI5O+gyBGT6hcLoduNa7yCObVVCk3bFWsoD+xcqTrBcP6dNJN/NB1Br2QGhSN2snHAqeRNKVFQiyeAFLPSKGwY8aq9EPgsi17qd4ywPMxiH8w6N1qX1tLKtzhOeemHWeJQfFQ5H23q7qSlJUcjgTEl3x2/Q==",
+    key: "rafYl4oSAKQX+GYoic9oW4iGwiYpZzs0",
+    iv: 189,
+  },
+  {
+    sbox: "2lQehmgyYFAoWUi0haazZqHy5zZ34NN+VzlfsoB2Y1yY0IuMLjgVcV2xt8t4moH+AP0NMJ5qekW7DFIHEWKkOgIBIMhDdA8lbM6iHKjDlq6IChpb3CnA9NmsvQW/afdt1SfJjTdwcvpKqunCJLxBFmXX9hecm6tGb+HRxD7BC3njoxPxgnX5pdKP1IMSkd4/O3NRfZSE6DVLG2s9uexaipA05cpJzE8Qkv/z5jzHAwlEWOLd3yxA+0cvVbpOoJPFGc8f1lb4vu2HUxjuuEwEQk0GsPCVnyKvfOoh9TG2YYmZLV4I67UU2NsrrakqZ47k/O+ne25/DjPGZCMdnZcmzQ==",
+    key: "2USAq+VTo5ht4bQn+K9DUcpUQRTtrB56",
+    iv: 133,
+  },
+  {
+    sbox: "+mhJSFwzaV+PQPDyKp2scO/S9SdFsy/7e56UWT8XHbK3E2+19nEPwfwOgE9uVCaDtOAWTobCZX+cBCXlIbBqyDyQB1beKLspW6kGPhBCV9x0jf0KUeFhHjmlMf7qMFIB41PfDFprZ3bJiK4YxrZDv+K6dcwJmggVO8f5ktrXTM0cZL4fer0SpnkbvNajPbHxfuTz5lVEBarOI4rdc+2V6zTsjpfQYjgN1MMr6EvA6eehN6dQ1bgUogt9rZOBbQBeNnLYY00uZqSoJBnFi5gthCJsWF33ykosn9v/9KB8udMCz0YRYImrA4VHr5mMgpH4xDXLeEHRd5vZOiAalofuMg==",
+    key: "yNHlokVEnuecesDrB/lDhVuUNiheWc3a47VtkwZ2ENg=",
+    iv: 32,
+  },
+];
+
+function decodeBase64(value) {
+  const binary = atob(String(value).replace(/-/g, "+").replace(/_/g, "/"));
+  return Uint8Array.from(binary, (character) => character.charCodeAt(0));
 }
 
-function nonEmptyString(value) {
-  return typeof value === "string" && value.trim() ? value.trim() : "";
-}
-
-function cleanText(text) {
-  if (!text) return "";
-  return text
-    .replace(/<[^>]+>/g, " ")
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-// Fetch via FlareSolverr proxy to bypass Cloudflare JS challenge
-async function fetchViaFlareSolverr(targetUrl) {
-  const body = JSON.stringify({
-    cmd: "request.get",
-    url: targetUrl,
-    maxTimeout: TIMEOUT_MS - 5000
-  });
-
-  try {
-    const res = await harbor.http(FLARESOLVERR_ENDPOINT, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        accept: "application/json"
-      },
-      body: body,
-      responseType: "text",
-      timeoutMs: TIMEOUT_MS
-    });
-
-    if (res && res.ok && res.body) {
-      const data = JSON.parse(res.body);
-      if (data && data.status === "ok" && data.solution && data.solution.response) {
-        return data.solution.response;
-      }
-    }
-  } catch (error) {
-    harbor.log("FlareSolverr request failed, trying direct fallback:", String(error));
+function encodeBase64Url(bytes) {
+  let binary = "";
+  for (let offset = 0; offset < bytes.length; offset += 0x8000) {
+    const chunk = bytes.subarray(offset, offset + 0x8000);
+    for (let index = 0; index < chunk.length; index++) binary += String.fromCharCode(chunk[index]);
   }
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
 
-  // Direct fetch fallback if FlareSolverr is unavailable
-  const direct = await harbor.http(targetUrl, {
-    headers: {
-      "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-      accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-      referer: COMIX_ORIGIN + "/"
-    },
+const LAYERS = LAYER_DATA.map((item) => {
+  const sbox = decodeBase64(item.sbox);
+  const inverse = new Uint8Array(256);
+  for (let index = 0; index < sbox.length; index++) inverse[sbox[index]] = index;
+  return { sbox, inverse, key: decodeBase64(item.key), iv: item.iv };
+});
+
+function encodeToken(input) {
+  let bytes = new TextEncoder().encode(input);
+  for (const layer of LAYERS) {
+    const output = new Uint8Array(bytes.length);
+    let previous = layer.iv;
+    for (let index = 0; index < bytes.length; index++) {
+      const value = layer.sbox[(bytes[index] ^ layer.key[index % layer.key.length] ^ previous) & 255];
+      output[index] = value;
+      previous = value;
+    }
+    bytes = output;
+  }
+  return encodeBase64Url(bytes);
+}
+
+function decodeEnvelope(token) {
+  let bytes = decodeBase64(token);
+  for (let layerIndex = LAYERS.length - 1; layerIndex >= 0; layerIndex--) {
+    const layer = LAYERS[layerIndex];
+    const output = new Uint8Array(bytes.length);
+    let previous = layer.iv;
+    for (let index = 0; index < bytes.length; index++) {
+      const cipher = bytes[index];
+      output[index] = (layer.inverse[cipher] ^ layer.key[index % layer.key.length] ^ previous) & 255;
+      previous = cipher;
+    }
+    bytes = output;
+  }
+  return new TextDecoder().decode(bytes);
+}
+
+function signedUrl(path, entries) {
+  const cleanPath = path.startsWith("/") ? path : "/" + path;
+  const sorted = (entries || [])
+    .filter((entry) => entry[1] !== undefined && entry[1] !== null && entry[1] !== "")
+    .map((entry) => [String(entry[0]), String(entry[1])])
+    .sort((left, right) => left[0].localeCompare(right[0]));
+  const canonical = sorted.map((entry) => entry[0] + "=" + entry[1]).join("&");
+  const token = encodeToken(canonical ? cleanPath + "?" + canonical : cleanPath);
+  const query = new URLSearchParams();
+  for (const [key, value] of sorted) query.append(key, value);
+  query.append("_", token);
+  return API + cleanPath + "?" + query.toString();
+}
+
+async function api(path, entries) {
+  const response = await harbor.http(signedUrl(path, entries), {
+    headers: { Accept: "application/json, text/plain, */*" },
     responseType: "text",
-    timeoutMs: TIMEOUT_MS
+    timeoutMs: 15000,
   });
-
-  if (direct && direct.ok && direct.body) {
-    return direct.body;
+  if (!response || !response.ok) {
+    throw new Error("Comix request failed" + (response ? " (HTTP " + response.status + ")" : ""));
   }
-
-  throw new Error("Failed to fetch page from Comix.to (Cloudflare challenge active or network timeout)");
-}
-
-function parseInitialData(html) {
-  const match = html.match(/<script[^>]*id=["']initial-data["'][^>]*>(.*?)<\/script>/s);
-  if (!match) return null;
+  let data;
   try {
-    return JSON.parse(match[1].trim());
-  } catch (_e) {
-    return null;
+    data = JSON.parse(response.body);
+    if (data && typeof data.e === "string") data = JSON.parse(decodeEnvelope(data.e));
+  } catch (_error) {
+    throw new Error("Comix returned an unreadable response");
   }
+  if (!data || data.error) throw new Error((data && data.message) || "Comix request failed");
+  return data.result === undefined ? data : data.result;
 }
 
-function extractCardsFromHtml(html) {
-  const cardMap = new Map();
+function toSummary(item) {
+  if (!item || !item.hid || !item.title) return null;
+  const poster = item.poster || {};
+  const altTitles = Array.isArray(item.altTitles) ? item.altTitles : [];
+  return {
+    id: String(item.hid),
+    title: String(item.title),
+    altTitle: altTitles.length ? String(altTitles[0]) : undefined,
+    cover: poster.large || poster.medium || poster.small || undefined,
+    year: Number.isFinite(item.year) ? Number(item.year) : undefined,
+    status: item.status || undefined,
+    description: item.synopsis || undefined,
+    contentRating: item.contentRating || undefined,
+    lastChapter: item.latestChapter == null ? undefined : String(item.latestChapter),
+  };
+}
 
-  // Match entire <a ...>...</a> elements
-  const linkRegex = /<a\b([^>]*)>(.*?)<\/a>/gs;
-  let match;
+function mangaEntries(offset, query, tagId) {
+  const page = Math.floor(Math.max(0, Number(offset) || 0) / PAGE_SIZE) + 1;
+  const entries = [["limit", PAGE_SIZE], ["page", page]];
+  if (query) entries.push(["keyword", query], ["order[relevance]", "desc"]);
+  else entries.push(["order[score]", "desc"]);
+  if (tagId) entries.push(["genres[]", tagId]);
+  return entries;
+}
 
-  while ((match = linkRegex.exec(html)) !== null) {
-    const attrs = match[1] || "";
-    const inner = match[2] || "";
+async function chapterPage(mangaId, page) {
+  return api("/manga/" + encodeURIComponent(mangaId) + "/chapters", [
+    ["limit", 100],
+    ["page", page],
+    ["order[number]", "desc"],
+  ]);
+}
 
-    const hrefMatch = attrs.match(/href=["'](\/title\/([^"'/]+))["']/i);
-    if (!hrefMatch) continue;
-
-    const fullPath = hrefMatch[1];
-    const slug = hrefMatch[2];
-
-    if (slug === "browse" || fullPath.includes("/chapter-") || slug.startsWith("user") || slug.startsWith("admin")) {
-      continue;
-    }
-
-    if (!cardMap.has(slug)) {
-      cardMap.set(slug, {
-        id: slug,
-        title: "",
-        cover: undefined,
-        contentRating: "safe"
-      });
-    }
-
-    const card = cardMap.get(slug);
-
-    // Extract title from aria-label or inner text
-    const ariaMatch = attrs.match(/aria-label=["']([^"']+)["']/i);
-    if (ariaMatch && cleanText(ariaMatch[1])) {
-      card.title = cleanText(ariaMatch[1]);
-    } else {
-      const text = cleanText(inner);
-      if (text && text.length >= 2 && !card.title) {
-        card.title = text;
-      }
-    }
-
-    // Extract cover image
-    const imgMatch = inner.match(/src=["'](https:\/\/static\.comix\.to\/[^"']+)["']/i);
-    if (imgMatch && !card.cover) {
-      card.cover = imgMatch[1];
-    }
-  }
-
-  const results = [];
-  for (const card of cardMap.values()) {
-    if (card.title) {
-      results.push(card);
-    }
-  }
-
-  return results;
+function toChapter(item) {
+  const group = item && item.group;
+  const number = item && item.number;
+  return {
+    id: String(item.id),
+    chapter: number == null ? null : String(number).replace(/\.0$/, ""),
+    title: item.name || undefined,
+    volume: item.volume == null ? null : String(item.volume),
+    pages: Number.isInteger(item.pagesCount) && item.pagesCount >= 0 ? item.pagesCount : 0,
+    language: item.language || "en",
+    group: group && group.name ? group.name : item.isOfficial ? "Official" : undefined,
+    publishAt: item.createdAt || item.publishedAt || undefined,
+  };
 }
 
 const plugin = {
   id: "comix-en",
   name: "Comix.to (English)",
 
-  async popular(offset) {
-    const itemOffset = Math.max(0, Math.floor(Number(offset) || 0));
-    const page = Math.floor(itemOffset / PAGE_SIZE) + 1;
-    const url = COMIX_ORIGIN + "/browse" + (page > 1 ? "?page=" + page : "");
-
-    const html = await fetchViaFlareSolverr(url);
-    const cards = extractCardsFromHtml(html);
-    return cards;
+  async popular(offset, tagId) {
+    const result = await api("/manga", mangaEntries(offset, "", tagId));
+    return (Array.isArray(result.items) ? result.items : []).map(toSummary).filter(Boolean);
   },
 
-  async search(query, offset) {
-    const normalizedQuery = nonEmptyString(query);
-    if (!normalizedQuery) return this.popular(offset);
-
-    const itemOffset = Math.max(0, Math.floor(Number(offset) || 0));
-    const page = Math.floor(itemOffset / PAGE_SIZE) + 1;
-    const url = COMIX_ORIGIN + "/browse?keyword=" + encodeURIComponent(normalizedQuery) + (page > 1 ? "&page=" + page : "");
-
-    const html = await fetchViaFlareSolverr(url);
-    const cards = extractCardsFromHtml(html);
-    return cards;
+  async search(query, offset, tagId) {
+    const text = String(query || "").trim();
+    const result = await api("/manga", mangaEntries(offset, text, tagId));
+    return (Array.isArray(result.items) ? result.items : []).map(toSummary).filter(Boolean);
   },
 
   async detail(id) {
-    const slug = String(id).replace(/^\/+title\/+/, "").replace(/^\/+/, "");
-    const url = COMIX_ORIGIN + "/title/" + slug;
-
-    const html = await fetchViaFlareSolverr(url);
-    const initialData = parseInitialData(html);
-
-    let title = slug;
-    let description = "";
-    let cover = "";
-    let status = "ongoing";
-    let year;
-    let author = "";
-    let contentRating = "safe";
-
-    if (initialData && initialData.queries) {
-      for (const key of Object.keys(initialData.queries)) {
-        if (key.includes("detail") && key.includes("manga")) {
-          const detail = initialData.queries[key];
-          if (detail && typeof detail === "object") {
-            title = nonEmptyString(detail.title) || title;
-            description = nonEmptyString(detail.synopsis) || "";
-            if (detail.poster && typeof detail.poster === "object") {
-              cover = detail.poster.large || detail.poster.medium || "";
-            } else if (typeof detail.poster === "string") {
-              cover = detail.poster;
-            }
-            if (detail.status) status = String(detail.status).toLowerCase();
-            if (detail.year) year = Number(detail.year);
-            if (detail.contentRating) contentRating = String(detail.contentRating).toLowerCase();
-            break;
-          }
-        }
-      }
+    const item = await api("/manga/" + encodeURIComponent(id));
+    const summary = toSummary(item);
+    if (!summary) return null;
+    const creators = [];
+    for (const author of Array.isArray(item.authors) ? item.authors : []) {
+      if (author && author.title) creators.push(author.title);
     }
-
-    // Fallback parsing from HTML if initial-data didn't yield everything
-    if (!cover) {
-      const coverMatch = html.match(/<img[^>]+src=["'](https:\/\/static\.comix\.to\/[^"']+)["'][^>]*class=["'][^"']*poster/i);
-      if (coverMatch) cover = coverMatch[1];
+    for (const artist of Array.isArray(item.artists) ? item.artists : []) {
+      if (artist && artist.title) creators.push(artist.title);
     }
-    if (!description) {
-      const descMatch = html.match(/<meta[^>]+name=["']description["'][^>]+content=["']([^"']+)["']/i);
-      if (descMatch) description = cleanText(descMatch[1]);
-    }
-
-    const summary = {
-      id: slug,
-      title: title,
-      contentRating: contentRating === "pornographic" || contentRating === "erotica" ? "adult" : "safe"
-    };
-
-    if (cover) summary.cover = cover;
-    if (description) summary.description = description;
-    if (status) summary.status = status;
-    if (year && Number.isInteger(year)) summary.year = year;
-    if (author) summary.author = author;
-
-    return summary;
+    return { ...summary, author: [...new Set(creators)].join(", ") || undefined };
   },
 
   async chapters(id) {
-    const slug = String(id).replace(/^\/+title\/+/, "").replace(/^\/+/, "");
-    const url = COMIX_ORIGIN + "/title/" + slug;
-
-    const html = await fetchViaFlareSolverr(url);
-    const chapters = [];
-    const seenIds = new Set();
-
-    // Regex for chapters: /title/{slug}/(chapterId)-chapter-(number)
-    const chapRegex = /href=["'](\/title\/[^"'/]+\/(\d+)-chapter-([^"'/]+))["']/g;
-    let match;
-
-    while ((match = chapRegex.exec(html)) !== null) {
-      const href = match[1];
-      const chapId = match[2];
-      const chapNum = match[3];
-
-      if (seenIds.has(chapId)) continue;
-      seenIds.add(chapId);
-
-      chapters.push({
-        id: slug + ":" + chapId + ":" + chapNum,
-        chapter: chapNum,
-        title: "Chapter " + chapNum,
-        pages: 0,
-        language: "en"
-      });
+    const first = await chapterPage(id, 1);
+    const items = Array.isArray(first.items) ? first.items.slice() : [];
+    const lastPage = Math.min(
+      MAX_CHAPTER_PAGES,
+      Math.max(1, Number(first.meta && first.meta.lastPage) || 1),
+    );
+    for (let start = 2; start <= lastPage; start += 5) {
+      const requests = [];
+      for (let page = start; page < Math.min(start + 5, lastPage + 1); page++) {
+        requests.push(chapterPage(id, page));
+      }
+      const results = await Promise.all(requests);
+      for (const result of results) {
+        if (Array.isArray(result.items)) items.push(...result.items);
+      }
     }
-
-    return chapters;
+    const seen = new Set();
+    const chapters = items.map(toChapter).filter((chapter) => {
+      if (!chapter.id || seen.has(chapter.chapter)) return false;
+      seen.add(chapter.chapter);
+      return true;
+    });
+    return chapters.sort((left, right) => {
+      const leftNumber = Number.parseFloat(left.chapter || "");
+      const rightNumber = Number.parseFloat(right.chapter || "");
+      const a = Number.isFinite(leftNumber) ? leftNumber : Number.NEGATIVE_INFINITY;
+      const b = Number.isFinite(rightNumber) ? rightNumber : Number.NEGATIVE_INFINITY;
+      return a - b;
+    });
   },
 
   async pageUrls(chapterId) {
-    const parts = String(chapterId).split(":");
-    if (parts.length < 3) return [];
-
-    const slug = parts[0];
-    const chapId = parts[1];
-    const chapNum = parts[2];
-    const url = COMIX_ORIGIN + "/title/" + slug + "/" + chapId + "-chapter-" + chapNum;
-
-    const html = await fetchViaFlareSolverr(url);
-    const urls = [];
-
-    // Extract image URLs from reader DOM or initial data
-    const imgRegex = /src=["'](https:\/\/static\.comix\.to\/[^"']+)["']/gi;
-    let match;
-    const seenImages = new Set();
-
-    while ((match = imgRegex.exec(html)) !== null) {
-      const src = match[1];
-      if (!src.includes("poster") && !src.includes("avatar") && !seenImages.has(src)) {
-        seenImages.add(src);
-        urls.push(src);
-      }
-    }
-
-    return urls;
+    const result = await api("/chapters/" + encodeURIComponent(chapterId));
+    const pages = result && result.pages ? result.pages : {};
+    const baseUrl = String(pages.baseUrl || "").replace(/\/+$/, "");
+    return (Array.isArray(pages.items) ? pages.items : []).map((item) => {
+      const url = typeof item === "string" ? item : item && item.url;
+      if (!url) return null;
+      const absolute = /^https?:\/\//i.test(url)
+        ? url
+        : baseUrl + "/" + String(url).replace(/^\/+/, "");
+      return {
+        url: absolute,
+        headers: {
+          Referer: BASE + "/",
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Harbor/1.0",
+        },
+      };
+    }).filter(Boolean);
   },
-
-  async tags() {
-    return [
-      { id: "action", name: "Action", group: "Genre" },
-      { id: "adventure", name: "Adventure", group: "Genre" },
-      { id: "comedy", name: "Comedy", group: "Genre" },
-      { id: "drama", name: "Drama", group: "Genre" },
-      { id: "fantasy", name: "Fantasy", group: "Genre" },
-      { id: "horror", name: "Horror", group: "Genre" },
-      { id: "mystery", name: "Mystery", group: "Genre" },
-      { id: "romance", name: "Romance", group: "Genre" },
-      { id: "sci-fi", name: "Sci-Fi", group: "Genre" },
-      { id: "slice-of-life", name: "Slice of Life", group: "Genre" },
-      { id: "supernatural", name: "Supernatural", group: "Genre" }
-    ];
-  }
 };
+
 
 harbor.register(plugin);
