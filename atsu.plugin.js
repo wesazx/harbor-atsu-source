@@ -64,17 +64,31 @@ function delay(milliseconds) {
   });
 }
 
+const TIMEOUT_MS = 30000;
+let lastRequestTime = 0;
+const MIN_REQUEST_INTERVAL_MS = 200;
+
+async function throttle() {
+  const now = Date.now();
+  const elapsed = now - lastRequestTime;
+  if (elapsed < MIN_REQUEST_INTERVAL_MS) {
+    await delay(MIN_REQUEST_INTERVAL_MS - elapsed);
+  }
+  lastRequestTime = Date.now();
+}
+
 async function requestJsonUrl(url, allowNotFound) {
   let finalStatus = "network";
   let finalMessage = "Invalid response";
 
-  for (let attempt = 0; attempt < 2; attempt += 1) {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    await throttle();
     let response = null;
     try {
       response = await harbor.http(url, {
         headers: HEADERS,
         responseType: "text",
-        timeoutMs: 8000
+        timeoutMs: TIMEOUT_MS
       });
     } catch (error) {
       finalMessage = nonEmptyString(error && error.message) || String(error);
@@ -92,11 +106,12 @@ async function requestJsonUrl(url, allowNotFound) {
     if (response && response.ok && payload) return payload;
 
     finalStatus = response && response.status ? response.status : "network";
-    finalMessage = payload && nonEmptyString(payload.error || payload.message) || finalMessage;
+    finalMessage = (payload && nonEmptyString(payload.error || payload.message)) || finalMessage;
     const retryable = !response || response.status === 429 || response.status >= 500 ||
       (response.ok && !payload);
-    if (attempt === 0 && retryable) {
-      await delay(350);
+    if (attempt < 2 && retryable) {
+      const backoff = 400 * Math.pow(2, attempt);
+      await delay(backoff);
       continue;
     }
     break;

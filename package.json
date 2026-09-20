@@ -1,0 +1,25 @@
+{
+  "name": "harbor-manga-sources",
+  "version": "1.1.0",
+  "description": "Fast and reliable community manga sources (MangaDex, Atsu, Comix) for the Harbor Stremio reader client.",
+  "scripts": {
+    "test": "node test/test-all.js",
+    "check": "node --check mangadex.plugin.js && node --check atsu.plugin.js && node --check comix.plugin.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/SilverHazer/harbor-manga-sources.git"
+  },
+  "keywords": [
+    "harbor",
+    "stremio",
+    "manga",
+    "atsu",
+    "mangadex",
+    "comix",
+    "manga-reader",
+    "flaresolverr"
+  ],
+  "author": "SilverHazer",
+  "license": "MIT"
+}
