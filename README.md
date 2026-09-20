@@ -135,6 +135,10 @@ This project was inspired by and built upon the foundation of:
 - **[wesazx](https://github.com/wesazx)** for the original [`harbor-atsu-source`](https://github.com/wesazx/harbor-atsu-source) repository. Thank you for the pioneering work and inspiration to bring external community manga sources to Harbor!
 - **[Harbor Stremio](https://github.com/harborstremio/harbor)** for creating an exceptional, modern desktop client for anime, movies, series, and manga.
 - The open-source teams behind **[FlareSolverr](https://github.com/FlareSolverr/FlareSolverr)** and **[MangaDex](https://mangadex.org)** for their outstanding public APIs and tools.
+- 
+👥 Contributors & Maintainers
+@wesazx – Original creator & Atsu provider
+@SilverHazer – MangaDex rewrite, Comix.to signed API provider, and automated test suite
 
 ---
 
